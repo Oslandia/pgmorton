@@ -1,0 +1,16 @@
+language: c
+
+before_install:
+  - sudo apt-get update
+  - sudo apt-get install -q postgresql-server-dev-9.3 libcunit1-dev valgrind
+
+addons:
+  postgresql: "9.3" # for "installcheck"
+
+script:
+  - cmake . -DWITH_TESTS=true
+  - make
+  - make check
+  - sudo make install
+  - make installcheck
+  - cat /home/travis/build/Oslandia/pgmorton/tests/pgsql/results/morton.out

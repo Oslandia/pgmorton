@@ -1,0 +1,21 @@
+{
+  "pipeline":[
+    {
+      "type":"readers.las",
+      "filename":"terrain.las",
+      "spatialreference":"EPSG:32616"
+    },
+    {
+      "type":"filters.chipper",
+      "capacity":500
+    },
+    {
+      "type":"writers.pgpointcloud",
+      "connection":"dbname=pg_morton_pc",
+      "table":"patchs",
+      "compression":"laz",
+      "srid":"32616",
+      "overwrite":"false"
+    }
+  ]
+}

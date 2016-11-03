@@ -1,0 +1,185 @@
+-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+\echo Use "CREATE EXTENSION morton" to load this file. \quit
+
+-- ----------------------------------------------------------------------------
+-- version
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION morton_script_version()
+    RETURNS text AS $$ SELECT '@PGMORTON_VERSION@'::text $$
+    LANGUAGE 'sql' IMMUTABLE STRICT;
+
+-- ----------------------------------------------------------------------------
+-- types
+-- ----------------------------------------------------------------------------
+CREATE FUNCTION mortongrid_in(cstring)
+  RETURNS mortongrid
+  AS 'MODULE_PATHNAME', 'mortongrid_in'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE FUNCTION mortongrid_out(mortongrid)
+  RETURNS cstring
+  AS 'MODULE_PATHNAME', 'mortongrid_out'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE TYPE mortongrid (
+  input = mortongrid_in,
+  output = mortongrid_out,
+  internallength = 40,
+  alignment = int4,
+  storage = plain
+);
+
+-- ----------------------------------------------------------------------------
+-- functions
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION Morton_GridMake(
+  xmin float8,
+  ymin float8,
+  xmax float8,
+  ymax float8,
+  size_grid integer)
+  RETURNS mortongrid
+  AS 'MODULE_PATHNAME', 'morton_grid_make'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION Morton_GridMake(box box2d, size_grid integer)
+  RETURNS mortongrid
+  LANGUAGE plpgsql IMMUTABLE STRICT
+    AS $$
+      DECLARE
+        xmin float8;
+        xmax float8;
+        ymin float8;
+        ymax float8;
+        grid mortongrid;
+      BEGIN
+        EXECUTE format('SELECT ST_XMin(CAST(%L AS box2d))', box) into xmin;
+        EXECUTE format('SELECT ST_XMax(CAST(%L AS box2d))', box) into xmax;
+        EXECUTE format('SELECT ST_YMin(CAST(%L AS box2d))', box) into ymin;
+        EXECUTE format('SELECT ST_YMax(CAST(%L AS box2d))', box) into ymax;
+
+        EXECUTE format('SELECT Morton_GridMake(%s, %s, %s, %s, %s)', xmin,
+                       ymin, xmax, ymax, size_grid) into grid;
+        RETURN grid;
+      END;
+    $$;
+
+CREATE OR REPLACE FUNCTION Morton_GridMake(table_name text, geom_col text, side integer)
+  RETURNS mortongrid
+  LANGUAGE plpgsql IMMUTABLE STRICT
+    AS $$
+      DECLARE
+        extent box2d;
+        grid mortongrid;
+      BEGIN
+        EXECUTE format('SELECT ST_Extent(%s) from %I',
+                       geom_col, table_name) into extent;
+
+        EXECUTE format('SELECT Morton_GridMake( CAST(%L AS box2d), %s)',
+                       extent, side) into grid;
+        RETURN grid;
+      END;
+    $$;
+
+CREATE OR REPLACE FUNCTION Morton_GridAsText(grid mortongrid)
+  RETURNS text
+  AS 'MODULE_PATHNAME', 'morton_grid_astext'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION Morton_Gridded(x float8, y float8, grid mortongrid)
+  RETURNS integer[]
+  AS 'MODULE_PATHNAME', 'morton_gridded'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION Morton_Gridded(geom geometry, grid mortongrid)
+  RETURNS integer[]
+  LANGUAGE plpgsql IMMUTABLE STRICT
+    AS $$
+      DECLARE
+        arr integer[];
+      BEGIN
+        EXECUTE format('select Morton_Gridded(' ||
+                       'st_x(st_centroid(%L)), ' ||
+                       'st_y(st_centroid(%L)) ' ||
+                       ', %L)', geom, geom, grid) into arr;
+        RETURN arr;
+      END;
+    $$;
+
+CREATE OR REPLACE FUNCTION Morton_Encode(x integer, y integer)
+  RETURNS bigint
+  AS 'MODULE_PATHNAME', 'morton_encode'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION Morton_Encode(x float8, y float8, grid mortongrid)
+  RETURNS bigint
+  LANGUAGE plpgsql IMMUTABLE STRICT
+    AS $$
+      DECLARE
+      xx integer;
+      yy integer;
+      code bigint;
+      BEGIN
+        EXECUTE format('SELECT (Morton_Gridded(%s, %s, %L))[1]',
+                       x, y, grid) into xx;
+        EXECUTE format('SELECT (Morton_Gridded(%s, %s, %L))[2]',
+                       x, y, grid) into yy;
+
+        EXECUTE format('SELECT Morton_Encode(%s, %s)', xx, yy) into code;
+        RETURN code;
+      END;
+    $$;
+
+CREATE OR REPLACE FUNCTION Morton_Encode(geom geometry, grid mortongrid)
+  RETURNS bigint
+  LANGUAGE plpgsql IMMUTABLE STRICT
+    AS $$
+      DECLARE
+        code bigint;
+        gridded integer[];
+      BEGIN
+        EXECUTE format('SELECT Morton_Gridded(%L, %L)', geom, grid) into gridded;
+        EXECUTE format('SELECT Morton_Encode(%s, %s)', gridded[1], gridded[2]) into code;
+        RETURN code;
+      END;
+    $$;
+
+CREATE OR REPLACE FUNCTION Morton_Decode(bigint)
+  RETURNS integer[]
+  AS 'MODULE_PATHNAME', 'morton_decode'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION Morton_Revert(bigint)
+  RETURNS bigint
+  AS 'MODULE_PATHNAME', 'morton_revert'
+  LANGUAGE 'c' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION Morton_Update(
+  table_name text,
+  geom_col text,
+  index_col text,
+  side integer,
+  revert boolean default False)
+  RETURNS void
+  LANGUAGE plpgsql VOLATILE
+    AS $$
+      DECLARE
+        query text;
+        code text;
+        grid mortongrid;
+      BEGIN
+        EXECUTE format('SELECT Morton_GridMake(%L, %L, %L)',
+                       table_name, geom_col, side) into grid;
+        code := format('Morton_Encode(%s, %L)', geom_col, grid);
+
+        IF revert THEN
+          query := format('UPDATE %s SET %s = morton_revert(%s)',
+                          table_name, index_col, code);
+        ELSE
+          query := format('UPDATE %s SET %s = %s',
+                          table_name, index_col, code);
+        END IF;
+
+        EXECUTE query;
+      END;
+    $$;

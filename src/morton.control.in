@@ -1,0 +1,7 @@
+# morton extension
+comment = 'Morton indexing'
+default_version = '@PGMORTON_VERSION@'
+module_pathname = '$libdir/morton-@PGMORTON_VERSION_MAJOR@'
+relocatable = true
+superuser = true
+requires = 'postgis'
