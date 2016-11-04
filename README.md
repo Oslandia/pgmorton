@@ -358,3 +358,7 @@ Result with a revert Morton code computed on a grid of size 256x256:
 <p align="center">
 <img align="center" src="https://github.com/Oslandia/pgmorton/blob/master/tests/graph/pc/results/morton_revert_256_5000.png" width="350">
 </p>
+
+## License
+
+pgmorton is distributed under LGPL2 or later.
