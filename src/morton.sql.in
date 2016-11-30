@@ -64,7 +64,7 @@ CREATE OR REPLACE FUNCTION Morton_GridMake(box box2d, size_grid integer)
       END;
     $$;
 
-CREATE OR REPLACE FUNCTION Morton_GridMake(table_name text, geom_col text, side integer)
+CREATE OR REPLACE FUNCTION Morton_GridMake(table_name regclass, geom_col text, side integer)
   RETURNS mortongrid
   LANGUAGE plpgsql IMMUTABLE STRICT
     AS $$
@@ -72,9 +72,7 @@ CREATE OR REPLACE FUNCTION Morton_GridMake(table_name text, geom_col text, side 
         extent box2d;
         grid mortongrid;
       BEGIN
-        EXECUTE format('SELECT ST_Extent(%s) from %I',
-                       geom_col, table_name) into extent;
-
+        EXECUTE 'SELECT ST_Extent(' || quote_ident(geom_col) || '::geometry) from ' || table_name  into extent;
         EXECUTE format('SELECT Morton_GridMake( CAST(%L AS box2d), %s)',
                        extent, side) into grid;
         RETURN grid;
@@ -169,8 +167,8 @@ CREATE OR REPLACE FUNCTION Morton_Update(
         grid mortongrid;
       BEGIN
         EXECUTE format('SELECT Morton_GridMake(%L, %L, %L)',
-                       table_name, geom_col, side) into grid;
-        code := format('Morton_Encode(%s, %L)', geom_col, grid);
+                       table_name::regclass, geom_col, side) into grid;
+        code := format('Morton_Encode(%I::geometry, %L)', geom_col, grid);
 
         IF revert THEN
           query := format('UPDATE %s SET %s = morton_revert(%s)',

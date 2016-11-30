@@ -98,7 +98,7 @@ computed:
 
 
 
-**Morton_GridMake(table_name text, geom_col text, size integer)** returns **MortonGrid**
+**Morton_GridMake(table_name regclass, geom_col text, size integer)** returns **MortonGrid**
 
 > Compute `MortonGrid` for the geometry column `geom_col` considering the grid
 > `size`.
